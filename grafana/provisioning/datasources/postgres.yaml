@@ -1,0 +1,29 @@
+# Grafana datasource provisioning.
+#
+# Connects to the Trends Postgres via a least-privilege `grafana_reader` role.
+# The role must be created manually one time after first deploy — see
+# README "Observability". Env vars are interpolated by Grafana at startup
+# (supported since v9): use $VAR or ${VAR} syntax.
+#
+# Privacy boundary: this datasource is for OPERATIONAL metrics only —
+# event counts, ingestion rates, lag, table sizes. Do NOT build dashboards
+# that surface individual user slugs or payload contents. See
+# feedback_privacy_observability_boundary memory and CLAUDE.md.
+
+apiVersion: 1
+
+datasources:
+  - name: Trends Postgres
+    type: postgres
+    access: proxy
+    url: $GRAFANA_POSTGRES_HOST:5432
+    user: $GRAFANA_POSTGRES_USER
+    database: $GRAFANA_POSTGRES_DB
+    secureJsonData:
+      password: $GRAFANA_READER_PASSWORD
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    isDefault: true
+    editable: false

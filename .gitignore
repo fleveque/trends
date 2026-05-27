@@ -1,0 +1,28 @@
+# Node
+node_modules/
+dist/
+coverage/
+*.log
+npm-debug.log*
+
+# Env files
+.env
+.env.local
+.env.*.local
+
+# Prisma generated client
+src/generated/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Direnv
+.envrc
+
+# Build artifacts
+*.tsbuildinfo

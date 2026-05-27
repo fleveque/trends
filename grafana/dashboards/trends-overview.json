@@ -1,0 +1,175 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "title": "Total events (last 24h)",
+      "type": "stat",
+      "datasource": { "type": "postgres", "uid": "Trends Postgres" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT count(*) AS value FROM events WHERE occurred_at >= now() - interval '24 hours';"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "title": "Ingestion lag (now - latest occurred_at)",
+      "description": "Seconds since the most recent event landed. High lag → NATS subscriber may be down or no upstream events.",
+      "type": "stat",
+      "datasource": { "type": "postgres", "uid": "Trends Postgres" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT extract(epoch FROM (now() - max(occurred_at))) AS lag_seconds FROM events;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 600 },
+              { "color": "red", "value": 3600 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "title": "Distinct portfolios tracked",
+      "description": "Unique slugs across all portfolio events. Useful for adoption tracking — no PII leaves this aggregate.",
+      "type": "stat",
+      "datasource": { "type": "postgres", "uid": "Trends Postgres" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT count(DISTINCT key) AS value FROM events WHERE kind = 'portfolio';"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }
+      }
+    },
+    {
+      "title": "DB size (events table)",
+      "type": "stat",
+      "datasource": { "type": "postgres", "uid": "Trends Postgres" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT pg_total_relation_size('events') AS bytes;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "bytes" }
+      },
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }
+      }
+    },
+    {
+      "title": "Events per hour, by kind",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "Trends Postgres" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
+      "id": 5,
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', occurred_at) AS time, kind AS metric, count(*) AS value FROM events WHERE $__timeFilter(occurred_at) GROUP BY 1, 2 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "barAlignment": 0,
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "stacking": { "mode": "normal", "group": "A" }
+          }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "title": "Top 10 stock symbols by price events",
+      "description": "Symbol popularity, not user data. Useful to see which tickers Quantic is refreshing most.",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "Trends Postgres" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 13 },
+      "id": 6,
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT key AS symbol, count(*) AS events FROM events WHERE kind = 'price' AND $__timeFilter(occurred_at) GROUP BY 1 ORDER BY 2 DESC LIMIT 10;"
+        }
+      ]
+    },
+    {
+      "title": "Events by env",
+      "type": "piechart",
+      "datasource": { "type": "postgres", "uid": "Trends Postgres" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 13 },
+      "id": 7,
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT env AS metric, count(*) AS value FROM events WHERE $__timeFilter(occurred_at) GROUP BY 1;"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["trends", "ops"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Trends — Operations",
+  "uid": "trends-ops",
+  "version": 1,
+  "weekStart": ""
+}

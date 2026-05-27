@@ -1,0 +1,16 @@
+# Tells Grafana to load all .json dashboards from /var/lib/grafana/dashboards
+# on startup. Dashboards are mounted there by the Kamal accessory `files:`
+# directive (see config/deploy.yml).
+apiVersion: 1
+
+providers:
+  - name: trends
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

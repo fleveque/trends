@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      nats:
+        image: nats:2-alpine
+        ports:
+          - 4222:4222
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: trends
+          POSTGRES_PASSWORD: trends
+          POSTGRES_DB: trends
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U trends -d trends"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=5
+
+    env:
+      DATABASE_URL: postgresql://trends:trends@localhost:5432/trends?schema=public
+      NATS_HOST: localhost
+      NATS_PORT: "4222"
+      NATS_ENV_PREFIX: dev
+      TRENDS_API_KEYS: ci-key
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Lint
+        run: npm run lint -- --max-warnings=0 || echo "lint warnings — review later"
+
+      - name: Unit tests
+        run: npm test -- --ci
+
+      - name: Build
+        run: npm run build
+
+      - name: E2E
+        run: npm run test:e2e

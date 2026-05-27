@@ -1,0 +1,30 @@
+// Prisma schema for Trends.
+//
+// One table — `events` — stores every NATS message we receive as a raw
+// snapshot. The payload is JSONB so Quantic can add fields without forcing
+// a migration here. `kind` and `key` are denormalized out of the payload so
+// the read endpoint hits a single composite index.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Event {
+  id         BigInt   @id @default(autoincrement())
+  env        String                                  // 'prod' | 'beta' | 'dev'
+  kind       String                                  // 'portfolio' | 'radar' | 'price'
+  key        String                                  // slug or symbol
+  occurredAt DateTime @default(now()) @map("occurred_at")
+  receivedAt DateTime @default(now()) @map("received_at")
+  subject    String                                  // full NATS subject
+  payload    Json
+
+  @@index([kind, key, occurredAt(sort: Desc)], map: "events_lookup")
+  @@index([env], map: "events_env")
+  @@map("events")
+}

@@ -1,0 +1,108 @@
+# Kamal deployment configuration for trends.
+# Deploys to the same Hetzner server as dividend-portfolio, pulse, logo-service.
+service: trends
+
+# Container image — GitHub Container Registry, same pattern as siblings.
+image: fleveque/trends
+
+servers:
+  web:
+    - 46.224.239.228
+
+# Kamal proxy handles SSL termination and routes by hostname.
+proxy:
+  ssl: true
+  host: trends.quantic.es
+  app_port: 3000
+  healthcheck:
+    path: /healthz
+    interval: 30
+
+registry:
+  server: ghcr.io
+  username: fleveque
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+env:
+  secret:
+    - TRENDS_API_KEYS
+    - DATABASE_URL
+  clear:
+    NODE_ENV: production
+    PORT: "3000"
+    # NATS lives on the Kamal docker network as `dividend-portfolio-nats`
+    # (same hostname Pulse uses — see pulse/config/deploy.yml).
+    NATS_HOST: dividend-portfolio-nats
+    NATS_PORT: "4222"
+    NATS_ENV_PREFIX: prod
+
+# Kamal accessories: dedicated containers that ship with this service.
+# Single-purpose, isolated, volumes persist across deploys.
+accessories:
+  # Dedicated Postgres for the event log.
+  postgres:
+    image: postgres:16-alpine
+    host: 46.224.239.228
+    port: "127.0.0.1:5433:5432"
+    env:
+      secret:
+        - POSTGRES_PASSWORD
+      clear:
+        POSTGRES_DB: trends
+        POSTGRES_USER: trends
+    volumes:
+      - "trends_postgres_data:/var/lib/postgresql/data"
+
+  # Grafana — operational dashboards only. Privacy boundary: never expose
+  # individual user data here, only aggregates / counts / rates / lag.
+  # See docs/TECH.md "Observability & privacy".
+  #
+  # Public at https://grafana.quantic.es. kamal-proxy terminates TLS and
+  # auto-renews via Let's Encrypt. Grafana's own auth is the entire access
+  # control surface from the internet — keep GRAFANA_ADMIN_PASSWORD strong
+  # (Bitwarden: TRENDS_GRAFANA_ADMIN_PASSWORD). Brute-force lockout is on
+  # by default in Grafana v11.
+  grafana:
+    image: grafana/grafana:11.3.0
+    host: 46.224.239.228
+    proxy:
+      ssl: true
+      host: grafana.quantic.es
+      app_port: 3000
+      healthcheck:
+        path: /api/health
+        interval: 30
+    env:
+      secret:
+        - GRAFANA_ADMIN_PASSWORD
+        - GRAFANA_READER_PASSWORD
+      clear:
+        # The container resolves `trends-postgres` on the Kamal docker
+        # network (accessory naming convention is `<service>-<accessory>`).
+        GRAFANA_POSTGRES_HOST: trends-postgres
+        GRAFANA_POSTGRES_USER: grafana_reader
+        GRAFANA_POSTGRES_DB: trends
+        GF_SECURITY_ADMIN_USER: admin
+        GF_USERS_ALLOW_SIGN_UP: "false"
+        GF_AUTH_ANONYMOUS_ENABLED: "false"
+        GF_AUTH_BASIC_ENABLED: "true"
+        GF_SERVER_ROOT_URL: https://grafana.quantic.es
+        # kamal-proxy terminates TLS; Grafana sees plain HTTP from the proxy.
+        GF_SERVER_ENFORCE_DOMAIN: "true"
+        GF_SERVER_DOMAIN: grafana.quantic.es
+    volumes:
+      - "trends_grafana_data:/var/lib/grafana"
+    files:
+      - grafana/provisioning/datasources/postgres.yaml:/etc/grafana/provisioning/datasources/postgres.yaml
+      - grafana/provisioning/dashboards/default.yaml:/etc/grafana/provisioning/dashboards/default.yaml
+      - grafana/dashboards/trends-overview.json:/var/lib/grafana/dashboards/trends-overview.json
+
+# DNS prereq: an A record `grafana.quantic.es → 46.224.239.228` must exist
+# BEFORE first deploy, or Let's Encrypt's ACME-01 challenge fails and
+# kamal-proxy falls back to a self-signed cert. Add it at your DNS provider
+# and propagate before running `kamal deploy`.
+
+# ARM64 build — matches the Hetzner host.
+builder:
+  arch: arm64

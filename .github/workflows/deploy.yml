@@ -1,0 +1,62 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: deploy-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+
+    env:
+      DOCKER_BUILDKIT: 1
+      BW_ACCOUNT: ${{ secrets.BW_ACCOUNT }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+
+      - name: Install Kamal
+        run: gem install kamal -v 2.7.0
+
+      - name: Install Bitwarden CLI
+        run: npm install -g @bitwarden/cli
+
+      - name: Login + unlock Bitwarden vault
+        env:
+          BW_CLIENTID: ${{ secrets.BW_CLIENTID }}
+          BW_CLIENTSECRET: ${{ secrets.BW_CLIENTSECRET }}
+          BW_PASSWORD: ${{ secrets.BW_PASSWORD }}
+        run: |
+          bw config server https://vault.bitwarden.eu
+          bw login --apikey
+          echo "BW_SESSION=$(bw unlock --raw --passwordenv BW_PASSWORD)" >> "$GITHUB_ENV"
+
+      - name: Set up SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add server to known hosts
+        run: |
+          ssh-keyscan 46.224.239.228 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Deploy to production
+        run: kamal deploy

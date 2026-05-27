@@ -15,37 +15,36 @@ Built with **NestJS** + **TypeScript** + **Prisma** + **PostgreSQL** + **NATS**.
 ## Services Architecture
 
 ```
-                              Internet
-                                 |
-        +----------+----------+----------+----------+
-        |          |          |          |          |
-   quantic.es  pulse.q.es  logos.q.es trends.q.es grafana.q.es
-        |          |          |          |          |
-    +---+------+ +-+----+ +---+----+ +---+----+ +---+----+
-    | Rails    | |Pulse | |Logo    | |Trends  | |Grafana |
-    |          | |Phoen.| |Service | |(this)  | |        |
-    | - Auth   | |LiveV.| |  Go    | |NestJS  | | ops    |
-    | - Radar  | |      | |        | |+ TS    | | dash-  |
-    | - Hold.  | |- Pub | |- Logo  | |        | | boards |
-    | - Plan   | |  por.| |  pipe  | |- NATS  | | only   |
-    | - AI     | |- Com.| |- SQLi  | |  sub.  | |        |
-    +-----+----+ +-+----+ +--------+ |- Hist  | +---+----+
-          |        |                 |  query |     |
-          |        |                 |  API   |     | (reads
-          |        |                 +---+----+     |  via
-          |        |                     |          |  grafana
-          |        |                     v          |  _reader,
-          |        |                  +--+-----+    |  read-only
-          |        |                  |Postgres|<---+  role)
-          |        |                  | accessory|
-          +---+ +--+                  +--------+
-              | |
-          +---+-+----+
-          |   NATS   |
-          | plain    |
-          | pub/sub  |
-          +----------+
+                               Internet
+                                  |
+         +----------+----------+----------+----------+
+         |          |          |          |          |
+    quantic.es  pulse.q.es  logos.q.es trends.q.es grafana.q.es
+         |          |          |          |          |
+    +----+-----+ +--+---+ +----+---+ +----+---+ +----+----+
+    | Rails    | |Pulse | |Logo    | |Trends  | |Grafana  |
+    |          | |Phoen.| |Service | |(this)  | |         |
+    | - Auth   | |LiveV.| |  Go    | |NestJS  | | ops     |
+    | - Radar  | |      | |        | |+ TS    | | dash-   |
+    | - Hold.  | |- Pub | |- Logo  | |        | | boards  |
+    | - Plan   | |  por.| |  pipe  | |- NATS  | | only    |
+    | - AI     | |- Com.| |- SQLi  | |  sub.  | |         |
+    +----+-----+ +--+---+ +--------+ |- Hist  | +----+----+
+         |          |                |  query |      |
+         |          |                |  API   |      |
+         |          |                +-+----+-+      |
+         |          |                  |    |        |
+         +-----+ +--+ +----------------+    |        |
+               | |    |                     v        v
+            +--+-+----+-+               +---+--------+-+
+            |   NATS    |               |  Postgres    |
+            | plain     |               |  (trends-    |
+            | pub/sub   |               |   postgres   |
+            +-----------+               |   accessory) |
+                                        +--------------+
 ```
+
+NATS subscribers: Pulse and Trends. NATS publisher: Rails. Trends owns its Postgres accessory; Grafana reads it through the read-only `grafana_reader` role. Logos has no NATS — it's pull-only HTTP, called by Rails.
 
 **Rails App** (`quantic.es`) — the main user-facing app. Auth, stock radar with target prices, holdings, buy plan, dividend calendar, and AI-powered insights via Google Gemini. **Publishes** events to NATS when portfolio/radar data changes. See [dividend-portfolio repo](https://github.com/fleveque/dividend-portfolio).
 

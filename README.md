@@ -12,6 +12,78 @@ Built with **NestJS** + **TypeScript** + **Prisma** + **PostgreSQL** + **NATS**.
 > If you're new to Node/TypeScript and coming from Ruby/Elixir/Go, start with
 > [`docs/TECH.md`](docs/TECH.md) — it explains the stack from your perspective.
 
+## Services Architecture
+
+```
+                              Internet
+                                 |
+        +----------+----------+----------+----------+
+        |          |          |          |          |
+   quantic.es  pulse.q.es  logos.q.es trends.q.es grafana.q.es
+        |          |          |          |          |
+    +---+------+ +-+----+ +---+----+ +---+----+ +---+----+
+    | Rails    | |Pulse | |Logo    | |Trends  | |Grafana |
+    |          | |Phoen.| |Service | |(this)  | |        |
+    | - Auth   | |LiveV.| |  Go    | |NestJS  | | ops    |
+    | - Radar  | |      | |        | |+ TS    | | dash-  |
+    | - Hold.  | |- Pub | |- Logo  | |        | | boards |
+    | - Plan   | |  por.| |  pipe  | |- NATS  | | only   |
+    | - AI     | |- Com.| |- SQLi  | |  sub.  | |        |
+    +-----+----+ +-+----+ +--------+ |- Hist  | +---+----+
+          |        |                 |  query |     |
+          |        |                 |  API   |     | (reads
+          |        |                 +---+----+     |  via
+          |        |                     |          |  grafana
+          |        |                     v          |  _reader,
+          |        |                  +--+-----+    |  read-only
+          |        |                  |Postgres|<---+  role)
+          |        |                  | accessory|
+          +---+ +--+                  +--------+
+              | |
+          +---+-+----+
+          |   NATS   |
+          | plain    |
+          | pub/sub  |
+          +----------+
+```
+
+**Rails App** (`quantic.es`) — the main user-facing app. Auth, stock radar with target prices, holdings, buy plan, dividend calendar, and AI-powered insights via Google Gemini. **Publishes** events to NATS when portfolio/radar data changes. See [dividend-portfolio repo](https://github.com/fleveque/dividend-portfolio).
+
+**Pulse** (`pulse.quantic.es`) — Elixir/Phoenix LiveView. **Subscribes** to NATS, serves public portfolio pages + a real-time community dashboard. No database — current state held in DETS + in-memory via GenServers. See [pulse repo](https://github.com/fleveque/pulse).
+
+**Logo Service** (`logos.quantic.es`) — Go service. Resolves stock ticker symbols to PNG logos (filesystem + SQLite cache, GitHub source repos, LLM fallback). HTTP-only, no NATS. See [logo-service repo](https://github.com/fleveque/logo-service).
+
+**Trends** (`trends.quantic.es`) — this repo. NestJS + TypeScript. **Subscribes** to the same NATS subjects as Pulse, but persists every event as a raw snapshot in PostgreSQL. Where Pulse holds *current* state in memory, Trends holds *history* on disk. `GET /events` exposes the event log to operators (X-API-Key auth).
+
+**Grafana** (`grafana.quantic.es`) — operator-only dashboards (event volumes, ingestion lag, DB size). Co-located with Trends as a Kamal accessory; reads Postgres via a read-only `grafana_reader` role. **Privacy boundary**: never exposes individual user data — see "Observability" below.
+
+**NATS** — lightweight messaging server (~10MB RAM), single Docker container on the same VPS as everything else (`dividend-portfolio-nats:4222` on the Kamal docker network). **Plain pub/sub**, NOT JetStream — messages are dropped if no subscriber is connected, so deploy ordering matters (consumer before publisher when adding new subjects). Environment isolation via subject prefixes (`prod.`, `beta.`, `dev.`).
+
+### NATS Event Flow
+
+```
+Rails publishes on holding/radar/opt-in/out changes + stock price refresh:
+
+  {env}.portfolio.updated     {version: 2, slug, base_currency,
+                                holdings: [{symbol, currency, quantity,
+                                            avg_price, price, value_in_base,
+                                            value_in_usd}, ...],
+                                stats: {yoc, currentYield, sectors}}
+  {env}.portfolio.opted_in    full portfolio snapshot (same shape)
+  {env}.portfolio.opted_out   {slug}
+  {env}.radar.updated         {version: 1, slug, base_currency, stocks: [...]}
+  {env}.radar.opted_in        full radar snapshot
+  {env}.radar.opted_out       {slug}
+  {env}.stock.price_updated   {symbol, price, currency, updated_at}
+
+Pulse  -> updates GenServer state -> pushes to LiveView via PubSub
+Trends -> persists raw payload to Postgres -> queryable via GET /events
+```
+
+Pulse and Trends are siblings on the same bus — both subscribe to the same subjects, but they keep different shapes of state for different purposes. Adding a new subject means shipping the consumer (Pulse and/or Trends) **before** the publisher (Quantic), or the first burst is lost.
+
+
+
 ## What it does today (v1)
 
 - Subscribes to:
@@ -176,15 +248,6 @@ Secrets come from Bitwarden via the kamal-secrets adapter (see
 - `TRENDS_POSTGRES_PASSWORD`
 - `TRENDS_GRAFANA_ADMIN_PASSWORD`
 - `TRENDS_GRAFANA_READER_PASSWORD`
-
-## Sibling services in the ecosystem
-
-| Service | Stack | Role |
-|---------|-------|------|
-| [dividend-portfolio](../dividend-portfolio) | Ruby on Rails | Core user-facing app — publisher of all domain NATS events. |
-| [pulse](../pulse) | Elixir / Phoenix | Public community dashboard — subscribes to the same NATS events, in-memory state. |
-| [logo-service](../logo-service) | Go / Gin | Stock ticker → logo lookup with caching. |
-| **trends** (this repo) | Node / NestJS | Historical time-series store — subscribes to NATS, queryable via REST. |
 
 ## Roadmap (not yet — see `../.claude/plans/`)
 
